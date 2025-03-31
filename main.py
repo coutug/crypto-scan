@@ -1,11 +1,11 @@
 import os
 import requests
 import pandas as pd
-from dotenv import load_dotenv
 from datetime import datetime, timezone
 from collections import defaultdict
+from dotenv import load_dotenv
 
-# --------- CONFIGURATION ---------
+# --------- LOAD ENV VARIABLES ---------
 load_dotenv()
 
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
@@ -61,13 +61,20 @@ def get_token_prices(contract_addresses_by_chain):
     prices = {}
     headers = {
         'accept': 'application/json',
-        'x-cg-pro-api-key': COINGECKO_API_KEY
+        'x-cg-demo-api-key': COINGECKO_API_KEY
     }
     for chain, contracts in contract_addresses_by_chain.items():
         if not contracts:
             continue
         joined = ','.join(contracts)
-        platform = 'ethereum' if chain == 'ethereum' else chain
+        platform_map = {
+            'ethereum': 'ethereum',
+            'arbitrum': 'arbitrum-one',
+            'polygon': 'polygon-pos',
+            'bsc': 'binance-smart-chain',
+            'avalanche': 'avalanche'
+        }
+        platform = platform_map.get(chain, chain)
         url = f"{COINGECKO_API}/{platform}?contract_addresses={joined}&vs_currencies=usd"
         try:
             resp = requests.get(url, headers=headers)
@@ -118,7 +125,7 @@ df_tx.to_csv("transactions_all_chains.csv", index=False)
 # Export du résumé des soldes
 summary_rows = []
 for (chain, addr, symbol), amount in balances.items():
-    usd_price = prices.get(addr, 0)
+    usd_price = prices.get(addr.lower(), 0)
     summary_rows.append({
         'chain': chain,
         'token': symbol,
