@@ -52,7 +52,7 @@ def normalize_transactions(transactions, chain):
         value = int(tx['value']) / (10 ** int(tx['tokenDecimal']))
         normalized.append({
             'chain': chain,
-            'timeStamp': datetime.fromtimestamp(int(tx['timeStamp']), timezone.utc),
+            'timestamp': datetime.fromtimestamp(int(tx['timeStamp']), timezone.utc),
             'hash': tx['hash'],
             'from': tx['from'],
             'to': tx['to'],
@@ -126,7 +126,7 @@ balances = compute_balances(all_transactions)
 
 # Export des transactions complètes
 df_tx = pd.DataFrame(all_transactions)
-df_tx.sort_values(by='timeStamp', inplace=True)
+df_tx.sort_values(by='timestamp', inplace=True)
 df_tx.to_csv("transactions_all_chains.csv", index=False)
 
 # Export du résumé des soldes
