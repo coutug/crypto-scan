@@ -12,6 +12,13 @@ WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")
 
+# Validate required environment variables early to avoid confusing runtime errors
+required_vars = {"WALLET_ADDRESS": WALLET_ADDRESS, "ETHERSCAN_API_KEY": ETHERSCAN_API_KEY}
+missing = [name for name, value in required_vars.items() if not value]
+if missing:
+    missing_str = ", ".join(missing)
+    raise EnvironmentError(f"Missing required environment variables: {missing_str}")
+
 # Mapping chain names to their Etherscan chain IDs
 CHAIN_IDS = {
     "ethereum": 1,
