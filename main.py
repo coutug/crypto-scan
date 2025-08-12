@@ -19,7 +19,8 @@ if missing:
     missing_str = ", ".join(missing)
     raise EnvironmentError(f"Missing required environment variables: {missing_str}")
 
-# Mapping chain names to their Etherscan chain IDs
+# CHAIN_IDS maps chain names to the IDs used by the Etherscan v2 API for
+# supported blockchains (Ethereum, Arbitrum, Polygon, etc.)
 CHAIN_IDS = {
     "ethereum": 1,
     "arbitrum": 42161,
