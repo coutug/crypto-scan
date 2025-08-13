@@ -137,12 +137,23 @@ def fetch_solana_balances(address: str):
     }
     resp = requests.post(url, json=payload, headers=headers)
     result = resp.json().get("result", {}).get("value", [])
-    balances = {}
+    balances = defaultdict(float)
     for entry in result:
         info = entry["account"]["data"]["parsed"]["info"]
         mint = info["mint"]
-        amount = float(info["tokenAmount"].get("uiAmount", 0))
-        balances[(mint, mint)] = amount
+        amt_info = info.get("tokenAmount", {})
+        ui_amount = amt_info.get("uiAmount")
+        if ui_amount is not None:
+            amount = float(ui_amount)
+        else:
+            ui_str = amt_info.get("uiAmountString")
+            if ui_str is not None:
+                amount = float(ui_str)
+            else:
+                raw = amt_info.get("amount", 0)
+                decimals = amt_info.get("decimals", 0)
+                amount = int(raw) / (10 ** decimals) if decimals else float(raw)
+        balances[(mint, mint)] += amount
 
     # native SOL balance
     payload = {
