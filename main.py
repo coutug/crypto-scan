@@ -11,9 +11,14 @@ load_dotenv()
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")
+SOLANA_ADDRESS = os.getenv("SOLANA_ADDRESS")
 
 # Validate required environment variables early to avoid confusing runtime errors
-required_vars = {"WALLET_ADDRESS": WALLET_ADDRESS, "ETHERSCAN_API_KEY": ETHERSCAN_API_KEY}
+required_vars = {
+    "WALLET_ADDRESS": WALLET_ADDRESS,
+    "ETHERSCAN_API_KEY": ETHERSCAN_API_KEY,
+    "SOLANA_ADDRESS": SOLANA_ADDRESS,
+}
 missing = [name for name, value in required_vars.items() if not value]
 if missing:
     missing_str = ", ".join(missing)
@@ -74,13 +79,17 @@ def get_token_prices(contract_addresses_by_chain):
     for chain, contracts in contract_addresses_by_chain.items():
         if not contracts:
             continue
-        joined = ','.join(contracts)
+        if chain == 'solana':
+            joined = ','.join(contracts)
+        else:
+            joined = ','.join(addr.lower() for addr in contracts)
         platform_map = {
             'ethereum': 'ethereum',
             'arbitrum': 'arbitrum-one',
             'polygon': 'polygon-pos',
             'bsc': 'binance-smart-chain',
-            'avalanche': 'avalanche'
+            'avalanche': 'avalanche',
+            'solana': 'solana'
         }
         platform = platform_map.get(chain, chain)
         url = f"{COINGECKO_API}/{platform}?contract_addresses={joined}&vs_currencies=usd"
@@ -89,11 +98,12 @@ def get_token_prices(contract_addresses_by_chain):
             data = resp.json()
             if isinstance(data, dict):
                 for addr in contracts:
-                    info = data.get(addr.lower())
+                    key = addr.lower() if chain != 'solana' else addr
+                    info = data.get(key)
                     if info and 'usd' in info:
-                        prices[addr.lower()] = info['usd']
+                        prices[key] = info['usd']
                     else:
-                        prices[addr.lower()] = 0
+                        prices[key] = 0
             else:
                 print(f"[!] Réponse inattendue de CoinGecko pour {chain}: {data}")
         except Exception as e:
@@ -110,6 +120,92 @@ def compute_balances(transactions):
             balances[key] -= tx['value']
     return balances
 
+
+def fetch_solana_transactions(address: str, limit: int = 100):
+    url = "https://api.mainnet-beta.solana.com"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getSignaturesForAddress",
+        "params": [address, {"limit": limit}],
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    signatures = resp.json().get("result", [])
+    transactions = []
+    for sig in signatures:
+        signature = sig["signature"]
+        payload = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "getParsedTransaction",
+            "params": [signature, "jsonParsed"],
+        }
+        resp = requests.post(url, json=payload, headers=headers)
+        result = resp.json().get("result")
+        if not result:
+            continue
+        block_time = result.get("blockTime")
+        meta = result.get("meta", {})
+        pre_bal = {
+            b["mint"]: float(b["uiTokenAmount"].get("uiAmount", 0))
+            for b in meta.get("preTokenBalances", [])
+            if b.get("owner") == address
+        }
+        post_bal = {
+            b["mint"]: float(b["uiTokenAmount"].get("uiAmount", 0))
+            for b in meta.get("postTokenBalances", [])
+            if b.get("owner") == address
+        }
+        for mint in set(pre_bal) | set(post_bal):
+            before = pre_bal.get(mint, 0)
+            after = post_bal.get(mint, 0)
+            delta = after - before
+            if delta == 0:
+                continue
+            direction = "IN" if delta > 0 else "OUT"
+            transactions.append(
+                {
+                    "chain": "solana",
+                    "timeStamp": datetime.fromtimestamp(block_time, timezone.utc)
+                    if block_time
+                    else None,
+                    "hash": signature,
+                    "from": address if direction == "OUT" else "",
+                    "to": address if direction == "IN" else "",
+                    "tokenName": mint,
+                    "tokenSymbol": mint,
+                    "contractAddress": mint,
+                    "value": abs(delta),
+                    "direction": direction,
+                }
+            )
+    return transactions
+
+
+def fetch_solana_balances(address: str):
+    url = "https://api.mainnet-beta.solana.com"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getTokenAccountsByOwner",
+        "params": [
+            address,
+            {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
+            {"encoding": "jsonParsed"},
+        ],
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    result = resp.json().get("result", {}).get("value", [])
+    balances = {}
+    for entry in result:
+        info = entry["account"]["data"]["parsed"]["info"]
+        mint = info["mint"]
+        amount = float(info["tokenAmount"].get("uiAmount", 0))
+        balances[(mint, mint)] = amount
+    return balances
+
 # --------- MAIN SCRIPT ---------
 all_transactions = []
 contract_addresses_by_chain = defaultdict(set)
@@ -122,8 +218,19 @@ for chain in CHAIN_IDS:
     for tx in norm_txs:
         contract_addresses_by_chain[chain].add(tx['contractAddress'])
 
+print("[*] Chargement solana...")
+sol_txs = fetch_solana_transactions(SOLANA_ADDRESS)
+all_transactions.extend(sol_txs)
+for tx in sol_txs:
+    contract_addresses_by_chain['solana'].add(tx['contractAddress'])
+sol_balances = fetch_solana_balances(SOLANA_ADDRESS)
+for mint, _ in sol_balances.items():
+    contract_addresses_by_chain['solana'].add(mint)
+
 prices = get_token_prices(contract_addresses_by_chain)
 balances = compute_balances(all_transactions)
+for (mint, symbol), amount in sol_balances.items():
+    balances[('solana', mint, symbol)] = amount
 
 # Export des transactions complètes
 df_tx = pd.DataFrame(all_transactions)
@@ -133,7 +240,8 @@ df_tx.to_csv("transactions_all_chains.csv", index=False)
 # Export du résumé des soldes
 summary_rows = []
 for (chain, addr, symbol), amount in balances.items():
-    usd_price = prices.get(addr.lower(), 0)
+    price_key = addr.lower() if chain != 'solana' else addr
+    usd_price = prices.get(price_key, 0)
     summary_rows.append({
         'chain': chain,
         'token': symbol,
