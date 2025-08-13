@@ -232,23 +232,41 @@ balances = compute_balances(all_transactions)
 for (mint, symbol), amount in sol_balances.items():
     balances[('solana', mint, symbol)] = amount
 
-# Export des transactions complètes
-df_tx = pd.DataFrame(all_transactions)
+# Export des transactions complètes (montants ≥ 1 USD)
+filtered_transactions = []
+for tx in all_transactions:
+    price_key = (
+        tx['contractAddress'].lower()
+        if tx['chain'] != 'solana'
+        else tx['contractAddress']
+    )
+    usd_price = prices.get(price_key, 0)
+    usd_value = tx['value'] * usd_price
+    if usd_value >= 1:
+        tx_copy = tx.copy()
+        tx_copy['usd_price'] = usd_price
+        tx_copy['usd_value'] = usd_value
+        filtered_transactions.append(tx_copy)
+
+df_tx = pd.DataFrame(filtered_transactions)
 df_tx.sort_values(by='timestamp', inplace=True)
 df_tx.to_csv("transactions_all_chains.csv", index=False)
 
-# Export du résumé des soldes
+# Export du résumé des soldes (montants ≥ 1 USD)
 summary_rows = []
 for (chain, addr, symbol), amount in balances.items():
     price_key = addr.lower() if chain != 'solana' else addr
     usd_price = prices.get(price_key, 0)
+    usd_value = amount * usd_price
+    if usd_value < 1:
+        continue
     summary_rows.append({
         'chain': chain,
         'token': symbol,
         'contract': addr,
         'amount': amount,
         'usd_price': usd_price,
-        'usd_value': amount * usd_price
+        'usd_value': usd_value,
     })
 
 df_summary = pd.DataFrame(summary_rows)
