@@ -8,16 +8,17 @@ from dotenv import load_dotenv
 # --------- LOAD ENV VARIABLES ---------
 load_dotenv()
 
-WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
+ETH_ADDRESS = os.getenv("ETH_ADDRESS")
+SOL_ADDRESS = os.getenv("SOL_ADDRESS")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")
-SOLANA_ADDRESS = os.getenv("SOLANA_ADDRESS")
 
 # Validate required environment variables early to avoid confusing runtime errors
 required_vars = {
-    "WALLET_ADDRESS": WALLET_ADDRESS,
+    "ETH_ADDRESS": ETH_ADDRESS,
+    "SOL_ADDRESS": SOL_ADDRESS,
     "ETHERSCAN_API_KEY": ETHERSCAN_API_KEY,
-    "SOLANA_ADDRESS": SOLANA_ADDRESS,
+    "COINGECKO_API_KEY": COINGECKO_API_KEY,
 }
 missing = [name for name, value in required_vars.items() if not value]
 if missing:
@@ -66,7 +67,7 @@ def normalize_transactions(transactions, chain):
             'tokenSymbol': tx['tokenSymbol'],
             'contractAddress': tx['contractAddress'].lower(),
             'value': value,
-            'direction': 'IN' if tx['to'].lower() == WALLET_ADDRESS.lower() else 'OUT',
+            'direction': 'IN' if tx['to'].lower() == ETH_ADDRESS.lower() else 'OUT',
         })
     return normalized
 
@@ -212,18 +213,18 @@ contract_addresses_by_chain = defaultdict(set)
 
 for chain in CHAIN_IDS:
     print(f"[*] Chargement {chain}...")
-    txs = fetch_erc20_transactions(chain, WALLET_ADDRESS, ETHERSCAN_API_KEY)
+    txs = fetch_erc20_transactions(chain, ETH_ADDRESS, ETHERSCAN_API_KEY)
     norm_txs = normalize_transactions(txs, chain)
     all_transactions.extend(norm_txs)
     for tx in norm_txs:
         contract_addresses_by_chain[chain].add(tx['contractAddress'])
 
 print("[*] Chargement solana...")
-sol_txs = fetch_solana_transactions(SOLANA_ADDRESS)
+sol_txs = fetch_solana_transactions(SOL_ADDRESS)
 all_transactions.extend(sol_txs)
 for tx in sol_txs:
     contract_addresses_by_chain['solana'].add(tx['contractAddress'])
-sol_balances = fetch_solana_balances(SOLANA_ADDRESS)
+sol_balances = fetch_solana_balances(SOL_ADDRESS)
 for mint, _ in sol_balances.items():
     contract_addresses_by_chain['solana'].add(mint)
 

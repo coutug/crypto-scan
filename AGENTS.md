@@ -11,9 +11,21 @@ Calc (ou tout tableur similaire).
 Chaînes EVM prises en charge : Ethereum, Arbitrum, Polygon, BSC,
 Avalanche.
 
-## Entrées nécessaires
+Autre chaîne à prendre en charge: Solana
 
-WALLET_ADDRESS – adresse publique du portefeuille à analyser
+### Structure
+Le repo est formé d'un script appelé main.py.
+
+2 nouveaux fichiers de tests devraient être créés:
+- EVM.py
+- SOL.py
+
+Ces 2 fichiers devraient tester les portions du script en lien avec les chaînes mentionnés dans leur titre afin de pouvoir debugger plus facilement les parties du script.
+
+## Entrées nécessaires
+ETH_ADDRESS – adresse publique du portefeuille à analyser
+
+SOL_ADDRESS – adresse publique du portefeuille à analyser
 
 ETHERSCAN_API_KEY – clé d’API (compatible Etherscan et dérivés)
 
@@ -21,16 +33,12 @@ COINGECKO_API_KEY – clé d’API pour les prix des tokens
 
 ## Sorties générées
 
-transactions_all_chains.csv – historique détaillé des transferts
+transactions.csv – historique détaillé des transferts
 
-token_balances_summary.csv – soldes agrégés et valorisation USD
+token_balances.csv – soldes agrégés et valorisation USD
 
-## Extensions envisagées
-Ajout du support Solana (extractions via Solana RPC ou API spécialisées)
-
-Intégration de certaines chaînes Cosmos
-
-Récupération des transactions depuis des échanges centralisés
+## Extensions en cours
+Ajout du support Solana: extraction via des appels à https://api.mainnet-beta.solana.com
 
 ## Conventions de contribution
 Python ≥ 3.10
