@@ -16,7 +16,7 @@ Autre chaîne à prendre en charge: Solana
 ### Structure
 Le repo est formé d'un script appelé main.py.
 
-2 nouveaux fichiers de tests devraient être créés:
+2 nouveaux fichiers devraient être créés:
 - EVM.py
 - SOL.py
 

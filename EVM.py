@@ -1,8 +1,8 @@
-"""Aggregate EVM and Solana token transfers into CSV reports.
+"""Export ERC-20 transfers for EVM chains only.
 
-Fetches ERC-20 and SPL token transactions, computes balances, enriches
-them with CoinGecko USD prices and exports two CSV files:
-``transactions.csv`` and ``token_balances.csv``.
+Mirrors ``main.py`` but restricts processing to Ethereum-compatible
+chains. Transactions are normalized, priced in USD via CoinGecko and
+written to ``transactions.csv`` and ``token_balances.csv``.
 """
 
 import os
@@ -17,13 +17,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ETH_ADDRESS = os.getenv("ETH_ADDRESS")
-SOL_ADDRESS = os.getenv("SOL_ADDRESS")
 ETHERSCAN_API_KEY = os.getenv("ETHERSCAN_API_KEY")
 COINGECKO_API_KEY = os.getenv("COINGECKO_API_KEY")
 
 required_vars = {
     "ETH_ADDRESS": ETH_ADDRESS,
-    "SOL_ADDRESS": SOL_ADDRESS,
     "ETHERSCAN_API_KEY": ETHERSCAN_API_KEY,
     "COINGECKO_API_KEY": COINGECKO_API_KEY,
 }
@@ -104,15 +102,11 @@ def get_token_prices(contract_addresses_by_chain):
         "polygon": "polygon-pos",
         "bsc": "binance-smart-chain",
         "avalanche": "avalanche",
-        "solana": "solana",
     }
     for chain, contracts in contract_addresses_by_chain.items():
         if not contracts:
             continue
-        if chain == "solana":
-            joined = ",".join(contracts)
-        else:
-            joined = ",".join(addr.lower() for addr in contracts)
+        joined = ",".join(addr.lower() for addr in contracts)
         platform = platform_map.get(chain, chain)
         url = (
             f"{COINGECKO_API}/{platform}?contract_addresses={joined}"
@@ -123,18 +117,14 @@ def get_token_prices(contract_addresses_by_chain):
             data = resp.json()
             if isinstance(data, dict):
                 for addr in contracts:
-                    key = addr.lower() if chain != "solana" else addr
-                    info = data.get(key)
-                    if info and "usd" in info:
-                        prices[key] = info["usd"]
-                    else:
-                        prices[key] = 0
+                    info = data.get(addr.lower())
+                    prices[addr.lower()] = info.get("usd", 0) if info else 0
             else:
                 print(
                     f"[!] Réponse inattendue de CoinGecko pour {chain}: {data}"
                 )
-        except Exception as e:  # pragma: no cover - network failure
-            print(f"[!] Erreur récupération prix pour {chain}: {e}")
+        except Exception as exc:  # pragma: no cover - network failure
+            print(f"[!] Erreur récupération prix pour {chain}: {exc}")
     return prices
 
 
@@ -147,96 +137,6 @@ def compute_balances(transactions):
             balances[key] += tx["value"]
         else:
             balances[key] -= tx["value"]
-    return balances
-
-
-def fetch_solana_transactions(address: str, limit: int = 100):
-    """Retrieve SPL token movements for a Solana ``address``."""
-    url = "https://api.mainnet-beta.solana.com"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getSignaturesForAddress",
-        "params": [address, {"limit": limit}],
-    }
-    resp = requests.post(url, json=payload, headers=headers)
-    signatures = resp.json().get("result", [])
-    transactions = []
-    for sig in signatures:
-        signature = sig["signature"]
-        payload = {
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "getParsedTransaction",
-            "params": [signature, "jsonParsed"],
-        }
-        resp = requests.post(url, json=payload, headers=headers)
-        result = resp.json().get("result")
-        if not result:
-            continue
-        block_time = result.get("blockTime")
-        meta = result.get("meta", {})
-        pre_bal = {
-            b["mint"]: float(b["uiTokenAmount"].get("uiAmount", 0))
-            for b in meta.get("preTokenBalances", [])
-            if b.get("owner") == address
-        }
-        post_bal = {
-            b["mint"]: float(b["uiTokenAmount"].get("uiAmount", 0))
-            for b in meta.get("postTokenBalances", [])
-            if b.get("owner") == address
-        }
-        for mint in set(pre_bal) | set(post_bal):
-            before = pre_bal.get(mint, 0)
-            after = post_bal.get(mint, 0)
-            delta = after - before
-            if delta == 0:
-                continue
-            direction = "IN" if delta > 0 else "OUT"
-            transactions.append(
-                {
-                    "chain": "solana",
-                    "timeStamp": (
-                        datetime.fromtimestamp(block_time, timezone.utc)
-                        if block_time
-                        else None
-                    ),
-                    "hash": signature,
-                    "from": address if direction == "OUT" else "",
-                    "to": address if direction == "IN" else "",
-                    "tokenName": mint,
-                    "tokenSymbol": mint,
-                    "contractAddress": mint,
-                    "value": abs(delta),
-                    "direction": direction,
-                }
-            )
-    return transactions
-
-
-def fetch_solana_balances(address: str):
-    """Return current SPL token balances for a Solana ``address``."""
-    url = "https://api.mainnet-beta.solana.com"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "getTokenAccountsByOwner",
-        "params": [
-            address,
-            {"programId": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"},
-            {"encoding": "jsonParsed"},
-        ],
-    }
-    resp = requests.post(url, json=payload, headers=headers)
-    result = resp.json().get("result", {}).get("value", [])
-    balances = {}
-    for entry in result:
-        info = entry["account"]["data"]["parsed"]["info"]
-        mint = info["mint"]
-        amount = float(info["tokenAmount"].get("uiAmount", 0))
-        balances[(mint, mint)] = amount
     return balances
 
 
@@ -253,27 +153,12 @@ def main():
         for tx in norm_txs:
             contract_addresses_by_chain[chain].add(tx["contractAddress"])
 
-    print("[*] Chargement solana...")
-    sol_txs = fetch_solana_transactions(SOL_ADDRESS)
-    all_transactions.extend(sol_txs)
-    for tx in sol_txs:
-        contract_addresses_by_chain["solana"].add(tx["contractAddress"])
-    sol_balances = fetch_solana_balances(SOL_ADDRESS)
-    for mint, _ in sol_balances.items():
-        contract_addresses_by_chain["solana"].add(mint)
-
     prices = get_token_prices(contract_addresses_by_chain)
     balances = compute_balances(all_transactions)
-    for (mint, symbol), amount in sol_balances.items():
-        balances[("solana", mint, symbol)] = amount
 
     filtered_transactions = []
     for tx in all_transactions:
-        price_key = (
-            tx["contractAddress"].lower()
-            if tx["chain"] != "solana"
-            else tx["contractAddress"]
-        )
+        price_key = tx["contractAddress"].lower()
         usd_price = prices.get(price_key, 0)
         usd_value = tx["value"] * usd_price
         if usd_value >= 1:
@@ -283,13 +168,13 @@ def main():
             filtered_transactions.append(tx_copy)
 
     df_tx = pd.DataFrame(filtered_transactions)
-    df_tx.sort_values(by="timestamp", inplace=True)
+    if not df_tx.empty:
+        df_tx.sort_values(by="timestamp", inplace=True)
     df_tx.to_csv("transactions.csv", index=False)
 
     summary_rows = []
     for (chain, addr, symbol), amount in balances.items():
-        price_key = addr.lower() if chain != "solana" else addr
-        usd_price = prices.get(price_key, 0)
+        usd_price = prices.get(addr.lower(), 0)
         usd_value = amount * usd_price
         if usd_value < 1:
             continue
@@ -305,10 +190,11 @@ def main():
         )
 
     df_summary = pd.DataFrame(summary_rows)
-    df_summary.sort_values(by="usd_value", ascending=False, inplace=True)
+    if not df_summary.empty:
+        df_summary.sort_values(by="usd_value", ascending=False, inplace=True)
     df_summary.to_csv("token_balances.csv", index=False)
 
-    print("\n[✓] Export terminé : transactions.csv et token_balances.csv")
+    print("\n[✓] Export EVM terminé : transactions.csv et token_balances.csv")
 
 
 if __name__ == "__main__":
